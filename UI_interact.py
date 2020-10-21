@@ -1,4 +1,6 @@
 import sys
+
+import traceback
 import PyQt5.QtGui as QtGui
 import matplotlib.pyplot as plt
 from matplotlib.backends.qt_compat import QtCore, QtWidgets
@@ -20,7 +22,7 @@ import func_base
 import mini_base
 import sip
 import numpy as np
-
+import calcium_base
 if QtCore.qVersion() >= "5.":
     from matplotlib.backends.backend_qt5agg import (FigureCanvas,
                                                     NavigationToolbar2QT as
@@ -46,12 +48,16 @@ class Communicate(QObject):
         pass
 
 
-class Application(QMainWindow):
+class Application(func_base.BaseWindow):
     # 主窗口 , QMainWindow提供了主窗口的功能，使用它能创建一些简单的状态栏、工具栏和菜单栏。class QMainWindow(QWidget)
     def __init__(self):
         super().__init__()  # use qwidget to creat window
         self.initUI()
-
+        self.ini_var()
+    def ini_var(self):
+        self.filemode=""
+        self.filemodes=data_base.FILEMODES
+        self.widget.pathway.setfilemode(self.filemode)
     def initUI(self):
         """
         initial the main window layout , and add analysis tool
@@ -107,43 +113,22 @@ class Application(QMainWindow):
         self._create_menuact('exit','&File',qApp.quit,'Ctrl+Q','Exit application')
         self._create_menu('import','&File')
         self._create_menuact('import txt','import',self.openFile,0,'load txt sweep')
+        self._create_menuact('import txt folder','import',self.openFolder,0,'load multi single sweep')
         self._create_menuact('new','&File',StatusTip='create sweep')
 
         self._create_menuact('CompleteMiniAnalysis','&Analysis',self.widget.mini_plane,0,StatusTip='analysis minis')
         self._create_menuact('Sweep Waves','&Analysis',self.show_sweep,0,StatusTip='show sweeps waves(smooth)')
         self._create_menuact('FTT frequency spectrum','&Analysis',self.show_FTT,0,StatusTip='analysis FTT')
         self._create_menuact('HIST','&Analysis',self.show_hist,0,StatusTip='analysis hist')
-
+        self._create_menuact('calcium event','&Analysis',self.widget.calcium_plane,0,StatusTip='extract roi calcium')
 
         # self.toolbar = self.addToolBar('Exit')  # creat 工具栏
         # self.toolbar.addAction(exitAct)
-    def _create_menu(self, menu_name,parent_menu=None,StatusTip=None):
-        """
-        create a primary menu
-        @param command:
-        @param menu_name:
-        @param parent_menu:
-        @param text: the menu name
-        """
-
-        if parent_menu:
-            menu = QMenu(menu_name, self)
-            self.menu_dict[menu_name] = menu
-            self.menu_dict[parent_menu].addMenu(menu)
-        else:
-            self.menu_dict[menu_name]=self.menubar.addMenu(menu_name)  # creat 菜单栏中的菜单项
-        self.menu_dict[menu_name].setStatusTip(StatusTip)
-    def _create_menuact(self,act_name,menu_name,command=None,shortcut=0,StatusTip=None):
-        Act = QAction(act_name,self)        # QAction是菜单栏、工具栏或者快捷键的动作的组合
-        Act.setShortcut(shortcut)
-        Act.setStatusTip(StatusTip)
-        if command:
-            Act.triggered.connect(command)
-        self.menu_dict[menu_name].addAction(Act)
-        #print('55',self.menu_dict[menu_name].menuAction())
 
     def show_sweep(self):
         global gl_DATA
+        # if gl_DATA!=self.filename.text():
+        #
         gl_DATA.show_sweep()
 
     def show_FTT(self):
@@ -165,8 +150,21 @@ class Application(QMainWindow):
     def openFile(self):
         fname = QFileDialog.getOpenFileName(self, 'Open file',
                                             'F:/DATA/minis/')
+        self.filemode='txt'
+        self.widget.pathway.setfilemode(self.filemode)
         if fname[0]:
             self.widget.pathway.filename.setText(fname[0])
+
+    def openFolder(self):
+        fname = QFileDialog.getExistingDirectory(self,'C:/')
+        if fname:
+            self.widget.pathway.filename.setText(fname)
+        # dialog.setFileMode(QFileDialog.Directory)
+        # dialog.setOption(QFileDialog.ShowDirsOnly)
+        #dialog.exec_()
+        self.filemode="txtfolder"
+        self.widget.pathway.setfilemode(self.filemode)
+
 
     def closeEvent(self, event):
         '''
@@ -181,6 +179,7 @@ class Application(QMainWindow):
         if reply == QMessageBox.Yes:
             plt.close('all')
             event.accept()
+            sys.exit(0)
         else:
             event.ignore()
 
@@ -321,6 +320,8 @@ class CenterWidget(QWidget):
         verticalSpacer = QSpacerItem(20, 40, QSizePolicy.Minimum, QSizePolicy.Expanding)
         self.vbox.addItem(verticalSpacer)
 
+        self.calcium_plane()
+
     def mini_plane(self):
         global gl_DATA
         if hasattr(self, 'miniplane'):
@@ -333,6 +334,41 @@ class CenterWidget(QWidget):
             self.miniplane = MiniPlane()
             self.vbox.insertWidget(1,self.miniplane)
 
+    def calcium_plane(self):
+        if hasattr(self, 'calciplane'):
+            if self.calciplane.isVisible():
+                self.calciplane.setVisible(False)
+            else:
+                self.calciplane.setVisible(True)
+
+        else:
+            self.calciplane=CalciumPlane()
+            self.vbox.insertWidget(1, self.calciplane)
+
+
+class CalciumPlane(QGroupBox):
+    def __init__(self):
+        QGroupBox.__init__(self,"Calcium Event anylysis")
+        self.initUI()
+    def initUI(self):
+        self.vbox=QVBoxLayout(self)
+        self.pathway=func_base.EditButtonLine("I:/Fang/20141211-15d/cs2/VF1/frame file.txt")
+        freqlabel=QLabel('frequency(HZ)')
+        self.freqline=QLineEdit('20')
+        self.vbox.addWidget(self.pathway)
+        self.ok=QPushButton('Execute')
+
+        hbox=QHBoxLayout()
+        hbox.addWidget(freqlabel)
+        hbox.addWidget(self.freqline)
+        hbox.addWidget(self.ok)
+        self.vbox.addLayout(hbox)
+        self.ok.clicked.connect(self.analysiscalcium)
+    def analysiscalcium(self):
+        calciumevent= calcium_base.CalciumEvent(self.pathway.text(),int(self.freqline.text()),'all')
+        calciumevent.load_all_frame()
+
+
 
 class MiniPlane(QGroupBox):
     def __init__(self):
@@ -340,28 +376,39 @@ class MiniPlane(QGroupBox):
         self.initUI()
 
     def initUI(self):
-        ltlable = QLabel('left time (s)')
-        rtlabel = QLabel('right time(s)')
-        duralabel=QLabel('min duration time(s)')
+        self.ini_common_UI()
+        self.pre_cut_UI()
+        self.thres_method_UI()
+        self.sosfit_method_UI()
+    def ini_common_UI(self):
+        self.tabwidget = QTabWidget()
 
-        threshold = QLabel('threshold(std)')
-        simu_amplitude=QLabel('simu_intensity')
-        clusterlabel = QLabel('cluster number')
+        self.method_name = mini_base.gl_minifind_method
+        self.vbox = QVBoxLayout(self)
+        self.vbox.addWidget(self.tabwidget)
 
-        self.ltname = QLineEdit('0.01')
-        self.rtname = QLineEdit('0.02')
-        self.minduname=QLineEdit('0.005')
+    def pre_cut_UI(self):
+        maxduralabel = QLabel('max duration (s)')
+        minduralabel = QLabel('min duration (s)')
+        threshold = QLabel('threshold(std)(global)')
+        simu_amplitude = QLabel('absolute_simu_intensity')
+        # rtlabel = QLabel('right time(s)')
+
+
+        self.maxduraname = QLineEdit('2.0')
+        #self.rtname = QLineEdit('0.02')
+        self.minduname = QLineEdit('0.005')
         self.downthresholdname = QLineEdit('4')
-        self.simuname=QLineEdit('50')
-
-        self.clustername = QLineEdit('5')
+        self.simuname = QLineEdit('50')
+        self.ok1 = QPushButton('OK')
+        clusterlabel = QLabel('cluster number')
+        self.clustername1 = QLineEdit('5')
+        self.ok1.clicked.connect(lambda :self.analysis(self.method_name[0]))
 
         hbox = QHBoxLayout()
-        hbox.addWidget(ltlable)
-        hbox.addWidget(self.ltname)
-        hbox.addWidget(rtlabel)
-        hbox.addWidget(self.rtname)
-        hbox.addWidget(duralabel)
+        hbox.addWidget(maxduralabel)
+        hbox.addWidget(self.maxduraname)
+        hbox.addWidget(minduralabel)
         hbox.addWidget(self.minduname)
         hbox.addWidget(threshold)
         hbox.addWidget(self.downthresholdname)
@@ -369,69 +416,105 @@ class MiniPlane(QGroupBox):
         hbox.addWidget(self.simuname)
 
         hbox.addWidget(clusterlabel)
-        hbox.addWidget(self.clustername)
+        hbox.addWidget(self.clustername1)
 
-        self.ok = QPushButton('OK')
-        hbox.addWidget(self.ok)
-        self.ok.clicked.connect(self.analysis)
+        hbox.addWidget(self.ok1)
+        self.tab1=QWidget()
+        self.tab1.setLayout(hbox)
+        self.tabwidget.addTab(self.tab1,self.method_name[0])
 
-        self.vbox = QVBoxLayout(self)
-        self.vbox.addLayout(hbox)
 
-    def analysis(self):
+    def thres_method_UI(self):
+        hbox = QHBoxLayout()
+        self.ok2 = QPushButton('OK')
+        clusterlabel = QLabel('cluster number')
+        self.clustername2 = QLineEdit('5')
+        self.ok2.clicked.connect(lambda :self.analysis(self.method_name[1]))
+        hbox.addWidget(clusterlabel)
+        hbox.addWidget(self.clustername2)
+        hbox.addWidget(self.ok2)
+        self.tab2 = QWidget()
+        self.tab2.setLayout(hbox)
+        self.tabwidget.addTab(self.tab2,self.method_name[1])
+    def sosfit_method_UI(self):
+        hbox = QHBoxLayout()
+        self.ok3 = QPushButton('OK')
+        clusterlabel = QLabel('cluster number')
+        self.clustername3 = QLineEdit('5')
+        self.ok3.clicked.connect(lambda :self.analysis(self.method_name[2]))
+        hbox.addWidget(clusterlabel)
+        hbox.addWidget(self.clustername3)
+        hbox.addWidget(self.ok3)
+        self.tab3 = QWidget()
+        self.tab3.setLayout(hbox)
+        self.tabwidget.addTab(self.tab3,self.method_name[2])
+
+    def analysis(self,methodname):
         global gl_DATA
         # threshold=10,lt=0.01,rt=0.02,n_cluster=4,dim=5
         gl_DATA.load_data()
-        gl_DATA.CompleteMiniAnalysis(float(self.downthresholdname.text()),
-                                     float(self.simuname.text()),
-                                     float(self.minduname.text()),
-                                     float(self.ltname.text()),
-                                     int(self.clustername.text()))
-        # print(DATA.Mini.fig1.number)
-        # PCA result : new figure
-        # self.canvas1 = FigureCanvas(plt.figure(DATA.Mini.fig1.number))
-        # self.vbox.addWidget(self.canvas1)
-        if hasattr(self, 'clusters_bks'):
-            while self.clusters_bks:
-                ck = self.clusters_bks.pop(0)
-                self.grid.removeWidget(ck)
-                sip.delete(ck)
+        try:
+            if methodname==self.method_name[0]:
+                gl_DATA.CompleteMiniAnalysis(method=methodname,
+                                        downthreshold=float(self.downthresholdname.text()),
+                                        simu_aplitude=float(self.simuname.text()),
+                                        mindura=float(self.minduname.text()),
+                                        maxdura=float(self.maxduraname.text()),
+                                        n_cluster=int(self.clustername1.text())),
+            elif methodname==self.method_name[1]:
+                pass
+            elif methodname==self.method_name[2]:
+                pass
+        except IndexError as e:
+            #print('ee')
+            QMessageBox.information(self, "ERROR Information",self.tr(str(e)))
+            traceback.print_exc()
 
-        self.clusters_bks = []
-
-        self.grid = QGridLayout()
-        # show mini cluster : widget buttons
-        fig = plt.figure(gl_DATA.Mini.fig2.number)
-        # return
-        for cluster, ax in zip(gl_DATA.Mini.cur_n_clusters, gl_DATA.Mini.axs):
-            # print('add')
-            extent = ax.get_window_extent().transformed(
-                fig.dpi_scale_trans.inverted())
-            fig.savefig('target.png', bbox_inches=extent)
-            scale = 0.2  # 每次缩小20%
-            img = QImage('target.png')  # 创建图片实例
-            originWidth = 20
-            originHeight = 40
-            mgnWidth = int(originWidth * scale)
-            mgnHeight = int(originHeight * scale)  # 缩放宽高尺寸
-            size = QSize(mgnHeight, mgnWidth)
-            pixImg = QPixmap.fromImage(
-                img
-            )  # .scaled(size, Qt.IgnoreAspectRatio))       #修改图片实例大小并从QImage实例中生成QPixmap实例以备放入QLabel控件中
-            bk = QLabel(str(cluster), self)
-            bk.resize(mgnWidth, mgnHeight)
-            bk.setText(str(cluster))
-            bk.setPixmap(pixImg)
-            func = functools.partial(self.reject_mini, cluster)
-            bk.mouseDoubleClickEvent = func
-            self.clusters_bks.append(bk)
-            self.grid.addWidget(bk, cluster // 5, cluster % 5)
-        self.vbox.addLayout(self.grid)
-        self.show_mini_in_sweep()
-        # # mini map to data : new figure
-        # self.canvas2 = FigureCanvas(plt.figure(DATA.fig.number))
-        # self.vbox.addWidget(self.canvas2)
-        plt.show()
+        # # print(DATA.Mini.fig1.number)
+        # # PCA result : new figure
+        # # self.canvas1 = FigureCanvas(plt.figure(DATA.Mini.fig1.number))
+        # # self.vbox.addWidget(self.canvas1)
+        # if hasattr(self, 'clusters_bks'):
+        #     while self.clusters_bks:
+        #         ck = self.clusters_bks.pop(0)
+        #         self.grid.removeWidget(ck)
+        #         sip.delete(ck)
+        #
+        # self.clusters_bks = []
+        #
+        # self.grid = QGridLayout()
+        # # show mini cluster : widget buttons
+        # fig = plt.figure(gl_DATA.Mini.fig2.number)
+        # # return
+        # for cluster, ax in zip(gl_DATA.Mini.cur_n_clusters, gl_DATA.Mini.axs):
+        #     # print('add')
+        #     extent = ax.get_window_extent().transformed(
+        #         fig.dpi_scale_trans.inverted())
+        #     fig.savefig('target.png', bbox_inches=extent)
+        #     scale = 0.2  # 每次缩小20%
+        #     img = QImage('target.png')  # 创建图片实例
+        #     originWidth = 20
+        #     originHeight = 40
+        #     mgnWidth = int(originWidth * scale)
+        #     mgnHeight = int(originHeight * scale)  # 缩放宽高尺寸
+        #     size = QSize(mgnHeight, mgnWidth)
+        #     pixImg = QPixmap.fromImage(
+        #         img
+        #     )  # .scaled(size, Qt.IgnoreAspectRatio))       #修改图片实例大小并从QImage实例中生成QPixmap实例以备放入QLabel控件中
+        #     bk = QLabel(str(cluster), self)
+        #     bk.resize(mgnWidth, mgnHeight)
+        #     bk.setText(str(cluster))
+        #     bk.setPixmap(pixImg)
+        #     func = functools.partial(self.reject_mini, cluster)
+        #     bk.mouseDoubleClickEvent = func
+        #     self.clusters_bks.append(bk)
+        #     self.grid.addWidget(bk, cluster // 5, cluster % 5)
+        # self.vbox.addLayout(self.grid)
+        # self.show_mini_in_sweep()
+        # # # mini map to data : new figure
+        # # self.canvas2 = FigureCanvas(plt.figure(DATA.fig.number))
+        # # self.vbox.addWidget(self.canvas2)
+        # plt.show()
 
     def show_mini_in_sweep(self):
 
@@ -474,7 +557,6 @@ class MiniChoseDialog(QWidget):
     def __init__(self, *args, **kwargs):
         # print(locals())
         self.cluster = kwargs['cluster']
-        del kwargs['cluster']
         # print(locals())
         super(QWidget, self).__init__(*args, **kwargs)
         self.ini_data(self.cluster)
@@ -593,7 +675,8 @@ class PathDialog(QGroupBox):
         QGroupBox.__init__(self,'file information setting')
         self.initUI()
         #self.setBaseSize()
-
+    def setfilemode(self,filemode):
+        self.filemode=filemode
     def initUI(self):
 
         hbox1 = QHBoxLayout()
@@ -646,6 +729,7 @@ class PathDialog(QGroupBox):
                                  float(self.endname.text()),
                               int(self.modename.currentData()),
                                  int(self.samplename.text()),
+                              self.filemode,
                               )
         try:
             gl_DATA.load_data_info()
@@ -688,11 +772,12 @@ class PathDialog(QGroupBox):
         ck=self.sender()
         #print(self.cks)
         #print('ck',ck)
-        number = self.cks.index(ck)
-        if ck.checkState() == 2:
-            choses.append(number)
-        else:
-            drops.append(number)
+        for ck in self.cks:
+            if ck.checkState() == 2:
+                choses.append(int(ck.text()))
+            else:
+                drops.append(int(ck.text()))
+        #print('drops',drops)
         gl_DATA.set_chose_drop(choses, drops)
 
 
@@ -760,8 +845,9 @@ class DropDownList(QWidget):
 if __name__ == '__main__':
     # plt.ion()
     app = QApplication(sys.argv)
-    window = Application()
-    window.show()  # IMPORTANT!!!!! Windows are hidden by default.
+    mainwindow = Application()
+    gl_DATA.set_root_window(mainwindow)
+    mainwindow.show()  # IMPORTANT!!!!! Windows are hidden by default.
     # 最后，我们进入了应用的主循环中，事件处理器这个时候开始工作。
     # 主循环从窗口上接收事件，并把事件传入到派发到应用控件里。
     # 当调用exit()方法或直接销毁主控件时，主循环就会结束。

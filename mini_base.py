@@ -14,24 +14,26 @@ import matplotlib.colors as colors
 import matplotlib.cm as cm
 import func_base
 import mini_base
+from types import SimpleNamespace
+gl_minifind_method=['pre_cut_off','threshold detect','sosfit']
 
-
-def minifinds(oridata, data, sample_freq, downthreshold,simu_A, mindura, lt, beginp, endp, method = 'pre_cut_off') -> object:
+def minifinds(method,oridata, data, sample_freq, beginp, endp,**kwargs) -> object:
     '''
     data=(np.array) a row is a continues signal
     n_components=5 for dimension of PCA
     data : use for find position
     iridata return the ori mini wave
     '''
+    print('-----kwargs------\n',kwargs)
+    localvs = SimpleNamespace(**kwargs)
     # rise_time ~1ms
-    print(locals())
+    #print(locals()) # will load  mindura maxdura downthrshold simu_aplitude n_cluster
     pre_n_point=round(0.025*sample_freq)
     # dura_p need small than rise_time
     dura_p=int(0.0005*sample_freq)
     # transform time to point
     # need maintain min duration below -threshold
-    min_dura_p=int(mindura*sample_freq)
-    if method == 'pre_cut_off':
+    if method == gl_minifind_method[0]:
         # -- process data -- #
         #For digital filters, Wn are in the same units as fs.
         # By default, fs is 2 half-cycles/sample,
@@ -58,6 +60,9 @@ def minifinds(oridata, data, sample_freq, downthreshold,simu_A, mindura, lt, beg
         # sos3 = signal.butter(8, [low_wn3,hign_wn3], output='sos',btype="bandpass")
         # data_50hz = signal.sosfiltfilt(sos3, data,axis=1)
 
+
+        min_dura_p=int(localvs.mindura*sample_freq)
+        max_dura_p=int(localvs.maxdura*sample_freq)
 
         # hign_wn4=2*300/sample_freq
         # sos4 = signal.butter(8, hign_wn4, output='sos',btype="highpass")
@@ -103,11 +108,11 @@ def minifinds(oridata, data, sample_freq, downthreshold,simu_A, mindura, lt, beg
         # stds=np.std(data,axis=1)
         # stds=np.std(data*(abs(data)<(downthreshold*stds[:,None])),axis=1)
         stds=np.std(data)
-        stds=np.std(data*(abs(data)<(downthreshold*stds)))
+        stds=np.std(data*(abs(data)<(localvs.downthreshold*stds)))
         
         print('data std:',stds)
 
-        mask1=func_base.find_levels(data,-downthreshold*stds,1,False,dura_p)
+        mask1=func_base.find_levels(data,-localvs.downthreshold*stds,1,False,dura_p)
         print('mask1 count',len(np.where(mask1)[0]))
 
         #std_max=max(mini_stds)
@@ -115,7 +120,7 @@ def minifinds(oridata, data, sample_freq, downthreshold,simu_A, mindura, lt, beg
         # get some stimulus offset time that usually > baseline , and expand lt=0.5s , rt=0.5s
         # get the no mini region upper the threshold
         #mask2 = func_base.array_vec_thre(data,simu_A,axis=1,large=True)
-        mask2 = data>simu_A
+        mask2 = data>localvs.simu_aplitude
 
         mask2 = func_base.expand_mask(mask2,min_dura_p,min_dura_p)
         mask = mask1 * (~mask2)
@@ -147,8 +152,9 @@ def minifinds(oridata, data, sample_freq, downthreshold,simu_A, mindura, lt, beg
             ey=tey=0
             starts_index=list(mini_finds[1][mini_finds[0]==n]) 
             for sy in starts_index: # for each sweep minis start time
-                large_window=data[n,sy:sy+sample_freq]
+                large_window=data[n,sy:sy+max_dura_p]
                 short_window=data[n,sy-pre_n_point:sy+min_dura_p]
+                # out of caculate region
                 if sy> endp:
                     break
                 # reject multi stack overlap
@@ -160,6 +166,7 @@ def minifinds(oridata, data, sample_freq, downthreshold,simu_A, mindura, lt, beg
                 #reject duration > 1s :
                 elif (large_window<-stds*0.5).all():
                    duration_too_long_count+=1
+                   tey=sy+max_dura_p
                 # reject out of set range
                 # 000011110011
                 elif sy<(beginp+min_dura_p):
@@ -176,8 +183,8 @@ def minifinds(oridata, data, sample_freq, downthreshold,simu_A, mindura, lt, beg
                         print('True is not in list , amplitude = %02f , pos=%d ' %(amplitude,sy))
                     ey=sy+term
                     sy=sy-min_dura_p
-
-                    if sy-tey<min_dura_p:
+                    if None:
+                        #if sy-tey<min_dura_p:
                         a,b,c=t_minis_finds[-1]
                         mini_wave = oridata[n, b:ey]
                         minis[-1]=mini_wave
@@ -298,25 +305,47 @@ def minifinds(oridata, data, sample_freq, downthreshold,simu_A, mindura, lt, beg
 class Mini():
 
 
-    def __init__(self,minis,mini_names,sample_freq):
+    def __init__(self,minis,mini_names,mini_finds,sample_freq):
         self.mini_names =mini_names
         self.minis = minis
         self.sample_freq = sample_freq
-    def delete_mini(self,index):
-        self.mini_names.pop(index)
-        self.minis=np.delete(self.minis,index,axis=0)
-        self.offsets.pop(index)
-        self.fit_paras.pop(index)
-        self.event_sizes.pop(index)
-        self.amplitudes.pop(index)
-        self.offsets.pop(index)
-        self.fast_constants.pop(index)
-        self.slow_constants.pop(index)
-        self.a_constants.pop(index)
-        self.cur_labels=list(self.cur_labels)
-        print('curlabel',self.cur_labels)
-        self.cur_labels.pop(index)
+        self.mini_finds=mini_finds
+        self.offsets= self.fit_paras= self.event_sizes= self.amplitudes= self.fast_constants= self.slow_constants=self.a_constants=self.cur_labels = None
+        self.dict=['mini_names','minis','offsets','fit_paras','event_sizes','amplitudes','fast_constants','slow_constants','a_constants','cur_labels','mini_finds']
+        self.delete_index = set()
 
+    def _delete_mini(self,index):
+        # truly delete
+        for name in self.dict:
+            if hasattr(self,name):
+                llist=getattr(self,name)
+                if isinstance(llist,list):
+                    llist.pop(index)
+                    #print(llist==getattr(self,name))
+                else:
+                    print(name)
+                    setattr(self,name,list(llist))
+                    llist = getattr(self, name)
+                    llist.pop(index)
+    def mark_delete_mini(self,indexs):
+        # delete candidate
+        # indexs is list or union or tuple
+        self.delete_index=self.delete_index.union(indexs)
+    def truly_delete_mini(self):
+        print(self.delete_index)
+        self.delete_index=list(self.delete_index)
+        self.delete_index.sort(reverse=True)
+        for number in self.delete_index:
+            self._delete_mini(number)
+        self.delete_index=set() # clear the delete flush
+
+    def reindex_mini(self):
+        self.mini_reindex={'label':{},'sweep':{}}
+        #self.mini_reindex['label']=func_base.list_to_dict(self.cur_labels,self.minis)
+        self.mini_reindex['label']=func_base.list_to_dict(self.cur_labels,range(len(self.cur_labels)))
+        #self.mini_reindex['sweep']=func_base.list_to_dict([x[0] for x in self.mini_finds],self.minis)
+        self.mini_reindex['sweep']=func_base.list_to_dict([x[0] for x in self.mini_finds],range(len(self.mini_finds)))
+        print(self.mini_reindex['label'])
     # self.minis_number,self.event_sizes,self.offsets,self.fast_constants,self.slow_constants,self.rise_10_90s,self.decay_90_50s=mini_base.statis(self.minis)
     def statis(self):
         if not self.minis:
@@ -344,11 +373,27 @@ class Mini():
 
         # fit use two expenent function
         param_bounds=([-np.inf,-np.inf,0,0,-np.inf],[np.inf,0,np.inf,np.inf,np.inf])
-
+        #nn=0
         for mini in self.minis:
             self.amplitudes.append(max(mini)-min(mini))
-            x_label=np.arange(0,len(mini))/self.sample_freq
-            paraments,pcov = curve_fit(templete_func,x_label,mini,bounds=param_bounds)
+            minilen= len(mini)
+            # if too large  fitcurve cannt work
+            if minilen>10000:
+                minilen=10000
+                mini=mini[:minilen]
+            x_label=np.arange(0,minilen)/self.sample_freq
+            #nn+=1
+            #print(len(x_label))
+            try:
+                paraments,pcov = curve_fit(templete_func,x_label,mini,bounds=param_bounds)
+            except:
+                #print(nn)
+                print("mini",mini,"label",x_label)
+                plt.figure()
+                plt.plot(x_label,mini)
+                plt.show()
+                raise
+
             self.fit_paras.append(paraments)
             self.offsets.append(paraments[4])
             self.fast_constants.append(paraments[2])
@@ -373,7 +418,7 @@ class Mini():
         #print(locals())
         mini=self.minis[index]
         x_label=np.arange(len(mini))/self.sample_freq
-        return self.mini_names[index],mini,self.cur_labels[index],self.scalarMap.to_rgba(self.cur_labels[index]),x_label
+        return self.mini_names[index],mini,self.cur_labels[index],x_label
 
 
     def classify(self,n_cluster=5):
@@ -395,62 +440,69 @@ class Mini():
         self.cur_n_cluster = np.unique(self.cur_labels).size
         self.cur_n_clusters = np.unique(self.cur_labels)
         self.cur_centroids = self.birch.subcluster_centers_
-
-    def make_fig(self):
-        self.set_color_card(self.ori_n_cluster)
-        if hasattr(self,'fig1'):
-            plt.figure(self.fig1.number)
-            plt.clf()
-            plt.figure(self.fig2.number)
-            plt.clf()
-        else:
-            self.fig1 = plt.figure()
-            self.fig2 = plt.figure()
-
-        Xdata =self.proced_minis[:,0]
-        Ydata =self.proced_minis[:,1]
-        Zdata =self.proced_minis[:,2]
-
-        # draw pca
-        plt.figure(self.fig1.number)
-        ax=plt.subplot(111)
-        # For a sequence of values to be color-mapped, use the 'c' argument instead.
-        ax.scatter(Xdata,Ydata,c=self.cur_labels,lw=2,cmap=self.jet)
-
-
-        #plt.show()
-
-        # draw cluster
-        t_list = list(self.cur_labels)
-        plt.figure(self.fig2.number,figsize=(10,5))
-        row=math.ceil(self.cur_n_cluster/5)
-        plt.gca().xaxis.set_major_locator(plt.NullLocator())
-        plt.gca().yaxis.set_major_locator(plt.NullLocator())
-        plt.gca().patch.set_alpha(0.5)
-        self.axs=[]
-        for n,cluster in enumerate(self.cur_n_clusters,1):
-            index =t_list.index(cluster)
-            mini=self.minis[index]
-            x_label=np.arange(len(mini))/self.sample_freq
-            ax=plt.subplot(row,5,n)
-            ax.spines['top'].set_visible(False) #去掉上边框
-            ax.spines['bottom'].set_visible(False) #去掉下边框
-            ax.spines['left'].set_visible(False) #去掉左边框
-            ax.spines['right'].set_visible(False) #去掉右边框
-            plt.plot(x_label,mini,color=self.scalarMap.to_rgba(self.cur_labels[index]))
-            self.axs.append(ax)
-
-
-
-
-
-
-    def set_color_card(self,n_cluster):
-        # set color card
-        self.jet = plt.get_cmap('jet')
-        cNorm = colors.Normalize(vmin=0, vmax=self.ori_n_cluster - 1)
-        self.scalarMap = cm.ScalarMappable(norm=cNorm, cmap=self.jet)
-        print('colormap: ',self.scalarMap.get_clim())
+    #
+    # def make_fig(self):
+    #
+    #     self.set_color_card(self.ori_n_cluster)
+    #     if hasattr(self,'fig1'):
+    #         plt.figure(self.fig1.number)
+    #         plt.clf()
+    #         plt.figure(self.fig2.number)
+    #         plt.clf()
+    #     else:
+    #         self.fig1 = plt.figure(figsize=(5,5))
+    #         unit = 2
+    #         column = 5
+    #         row = math.ceil(self.cur_n_cluster / 5)
+    #         wid = column * unit
+    #         hig = row * unit
+    #         self.fig2=plt.figure( figsize=(wid, hig))
+    #
+    #     Xdata =self.proced_minis[:,0]
+    #     Ydata =self.proced_minis[:,1]
+    #     Zdata =self.proced_minis[:,2]
+    #
+    #     # draw pca
+    #     plt.figure(self.fig1.number)
+    #     ax=plt.subplot(111)
+    #     # For a sequence of values to be color-mapped, use the 'c' argument instead.
+    #     ax.scatter(Xdata,Ydata,c=self.cur_labels,lw=2,cmap=self.jet)
+    #
+    #
+    #     #plt.show()
+    #
+    #     # draw cluster
+    #     t_list = list(self.cur_labels)
+    #     plt.figure(self.fig2.number)
+    #     plt.gca().xaxis.set_major_locator(plt.NullLocator())
+    #     plt.gca().yaxis.set_major_locator(plt.NullLocator())
+    #     plt.gca().patch.set_alpha(0.5)
+    #     #grid = plt.GridSpec(row, column, wspace=0.1, hspace=0.1)
+    #     self.axs=[]
+    #     for n,cluster in enumerate(self.cur_n_clusters,1):
+    #         index =t_list.index(cluster)
+    #         mini=self.minis[index]
+    #         x_label=np.arange(len(mini))/self.sample_freq
+    #         #print(n//5,n%5,row,column)
+    #         ax=plt.subplot(row,5,n)
+    #         ax.spines['top'].set_visible(False) #去掉上边框
+    #         ax.spines['bottom'].set_visible(False) #去掉下边框
+    #         ax.spines['left'].set_visible(False) #去掉左边框
+    #         ax.spines['right'].set_visible(False) #去掉右边框
+    #         plt.plot(x_label,mini,color=self.scalarMap.to_rgba(self.cur_labels[index]),pickradius=1)
+    #         self.axs.append(ax)
+    #
+    #
+    #
+    #
+    #
+    #
+    # def set_color_card(self,n_cluster):
+    #     # set color card
+    #     self.jet = plt.get_cmap('rainbow')
+    #     cNorm = colors.Normalize(vmin=0, vmax=self.ori_n_cluster - 1)
+    #     self.scalarMap = cm.ScalarMappable(norm=cNorm, cmap=self.jet)
+    #     print('colormap: ',self.scalarMap.get_clim())
 
     # DBSCAN clustering
     # minis_labels = DBSCAN(eps=0.3, min_samples=5).fit_predict(minis_pca)
